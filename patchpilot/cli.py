@@ -80,7 +80,7 @@ def main(argv: "list[str] | None" = None) -> int:
         stream=sys.stderr,
     )
     if args.command == "run":
-        from patchpilot.pipeline import run_pipeline
+        from patchpilot.pipeline import SUCCESS_STATUSES, run_pipeline
 
         result = run_pipeline(
             repo_path=args.repo,
@@ -93,7 +93,7 @@ def main(argv: "list[str] | None" = None) -> int:
         )
         print(f"Final status: {result.final_status}")
         print(f"Report written to: {args.output}")
-        return 0 if result.final_status in ("fixed", "dry_run") else 1
+        return 0 if result.final_status in SUCCESS_STATUSES else 1
     if args.command == "eval":
         from patchpilot.eval_runner import run_eval
 

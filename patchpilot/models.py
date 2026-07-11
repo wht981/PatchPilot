@@ -1,8 +1,8 @@
 """Typed data models shared across the PatchPilot pipeline.
 
-Distilled from the OpenHands SDK kernel contracts: every step of the loop
-(issue -> context -> plan -> patch -> test) exchanges immutable, typed
-records so the run is replayable and reportable.
+Every step of the loop (issue -> context -> plan -> patch -> test)
+exchanges immutable, typed records so the run is replayable and
+reportable.
 """
 
 from __future__ import annotations

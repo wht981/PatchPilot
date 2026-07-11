@@ -61,7 +61,6 @@ def run_pipeline(
     trace_path: str = "patchpilot_trace.json",
     max_debug_rounds: int = 1,
     dry_run: bool = False,
-    engine: str = "heuristic",
     test_timeout: float = 120.0,
     apply_mode: str = AUTO,
     patch_file: str = "patchpilot_fix.patch",
@@ -83,7 +82,7 @@ def run_pipeline(
     )
     logger.info("Candidate files: %s", context.candidate_files)
 
-    planner = _make_planner(engine)
+    planner = HeuristicPlanner()
     plan = planner.create_repair_plan(issue, context)
     tracer.record("plan_created", candidate_files=plan.candidate_files)
 
@@ -131,15 +130,9 @@ def run_pipeline(
         _finish(result, tracer, output_path, trace_path)
         return result
 
-    revert_fix = None
-    if engine == "openhands":
-        _run_openhands_repair(
-            result, commands, policy, tracer, max_debug_rounds, test_timeout
-        )
-    else:
-        revert_fix = _run_heuristic_repair(
-            result, commands, policy, tracer, max_debug_rounds, test_timeout
-        )
+    revert_fix = _run_heuristic_repair(
+        result, commands, policy, tracer, max_debug_rounds, test_timeout
+    )
 
     if result.final_status == FIXED:
         result.delivery = _deliver_fix(
@@ -304,61 +297,6 @@ def _analyze_failure(failure_text: str, next_candidate: CandidatePatch) -> str:
         f"{excerpt}\n"
         f"Next hypothesis: {next_candidate.description}"
     )
-
-
-def _run_openhands_repair(
-    result: PatchPilotResult,
-    commands: List[str],
-    policy: SecurityPolicy,
-    tracer: Tracer,
-    max_debug_rounds: int,
-    test_timeout: float,
-) -> None:
-    from patchpilot.engines.openhands_engine import OpenHandsEngine
-
-    engine = OpenHandsEngine()
-    assert result.baseline_test is not None
-    failure_text = failure_output(result.baseline_test)
-
-    max_attempts = 1 + max(0, max_debug_rounds)
-    for attempt in range(1, max_attempts + 1):
-        patch = engine.repair(result.repo_context, result.plan, failure_text)
-        tracer.record(
-            "patch_applied",
-            attempt=attempt,
-            engine="openhands",
-            files=[c.path for c in patch.changed_files],
-        )
-        test = run_tests(
-            result.repo_context.repo_path, commands, policy, timeout=test_timeout
-        )
-        tracer.record(
-            "tests_run", attempt=attempt, passed=test.passed, summary=test.summary
-        )
-        if attempt == 1:
-            result.initial_patch, result.initial_test = patch, test
-        else:
-            result.debug_rounds.append(
-                DebugRound(
-                    round_number=attempt - 1,
-                    failure_analysis=failure_text[-2000:],
-                    patch=patch,
-                    test=test,
-                )
-            )
-        if test.passed:
-            result.final_status = FIXED
-            return
-        failure_text = failure_output(test) or failure_text
-    result.final_status = NOT_FIXED
-
-
-def _make_planner(engine: str):
-    if engine == "openhands":
-        from patchpilot.engines.openhands_engine import OpenHandsEngine
-
-        return OpenHandsEngine()
-    return HeuristicPlanner()
 
 
 def _finish(

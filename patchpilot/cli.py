@@ -76,12 +76,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="patch file path used with --no-apply (default: patchpilot_fix.patch)",
     )
     run.add_argument(
-        "--engine",
-        choices=["heuristic", "openhands"],
-        default="heuristic",
-        help="repair engine (openhands requires the SDK and LLM_API_KEY)",
-    )
-    run.add_argument(
         "--json",
         action="store_true",
         help="print a machine-readable JSON summary to stdout (for CI)",
@@ -149,7 +143,6 @@ def _run_command(args: argparse.Namespace) -> int:
         trace_path=args.trace,
         max_debug_rounds=args.max_debug_rounds,
         dry_run=args.dry_run,
-        engine=args.engine,
         apply_mode=apply_mode,
         patch_file=args.patch_file,
     )

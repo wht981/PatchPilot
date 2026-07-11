@@ -2,10 +2,11 @@
 
 The heuristic engine performs bounded, mutation-based program repair:
 it derives target functions from failing test names and issue keywords,
-then proposes single-operator mutations inside those functions only.
-Each candidate patch touches exactly one operator in one file, records
-the original content, and produces a unified diff. Files outside the
-repository root are never modified.
+then proposes single-token mutations inside those functions only —
+arithmetic/comparison operator swaps, boolean `and`/`or` swaps, and
+off-by-one integer constants. Each candidate patch touches exactly one
+token in one file, records the original content, and produces a unified
+diff. Files outside the repository root are never modified.
 
 The pluggable OpenHands engine (see patchpilot.engines) replaces this
 strategy with a real LLM agent; the pipeline contract is the same.
@@ -23,7 +24,14 @@ from patchpilot.models import FileChange, RepairPlan
 
 
 MAX_FILES = 2
-MAX_CANDIDATES = 12
+MAX_CANDIDATES = 16
+
+# Mutation classes, tried in this order: arithmetic/comparison operator
+# swaps are the most common single-token bugs, then boolean logic, then
+# off-by-one integer constants.
+CLASS_OPERATOR = 0
+CLASS_BOOLEAN = 1
+CLASS_CONSTANT = 2
 
 # (regex matching the operator alone, replacement) — two-char operators are
 # matched with lookarounds so `<` never matches inside `<=`, `-` never
@@ -41,15 +49,25 @@ _OPERATOR_MUTATIONS: List[Tuple[str, str, str]] = [
     (r"(?<![>=\-])>(?![>=])", ">", ">="),
 ]
 
+_BOOLEAN_MUTATIONS: List[Tuple[str, str, str]] = [
+    (r"\band\b", "and", "or"),
+    (r"\bor\b", "or", "and"),
+]
+
+# Standalone integer literals (not part of identifiers, floats, or
+# attribute access); each occurrence yields n+1 and n-1 candidates.
+_INT_LITERAL = re.compile(r"(?<![\w.])(\d+)(?![\w.])")
+
 
 @dataclass
 class CandidatePatch:
-    """One proposed single-operator mutation."""
+    """One proposed single-token mutation."""
 
     relative_path: str
     description: str
     original_content: str
     new_content: str
+    class_rank: int = CLASS_OPERATOR
 
 
 class PatchBoundaryError(Exception):
@@ -92,30 +110,46 @@ def _mutations_for_span(
 ) -> List[CandidatePatch]:
     lines = content.splitlines(keepends=True)
     candidates: List[CandidatePatch] = []
-    for line_number in range(start, min(end, len(lines))):
+
+    def add(line_number: int, span: "Tuple[int, int]", replacement: str,
+            old: str, new: str, class_rank: int) -> None:
         line = lines[line_number]
-        code = line.split("#", 1)[0]
+        new_lines = list(lines)
+        new_lines[line_number] = line[: span[0]] + replacement + line[span[1] :]
+        candidates.append(
+            CandidatePatch(
+                relative_path=relative_path,
+                description=(
+                    f"swap `{old}` -> `{new}` in `{function}` "
+                    f"({relative_path}:{line_number + 1})"
+                ),
+                original_content=content,
+                new_content="".join(new_lines),
+                class_rank=class_rank,
+            )
+        )
+
+    for line_number in range(start, min(end, len(lines))):
+        code = lines[line_number].split("#", 1)[0]
         for pattern, old_op, new_op in _OPERATOR_MUTATIONS:
             for match in re.finditer(pattern, code):
-                mutated_line = (
-                    line[: match.start()] + new_op + line[match.end() :]
-                )
-                new_lines = list(lines)
-                new_lines[line_number] = mutated_line
-                candidates.append(
-                    CandidatePatch(
-                        relative_path=relative_path,
-                        description=(
-                            f"swap `{old_op}` -> `{new_op}` in `{function}` "
-                            f"({relative_path}:{line_number + 1})"
-                        ),
-                        original_content=content,
-                        new_content="".join(new_lines),
-                    )
-                )
-    # Try `return` lines first: the buggy expression is most often there.
+                add(line_number, match.span(), new_op, old_op, new_op,
+                    CLASS_OPERATOR)
+        for pattern, old_op, new_op in _BOOLEAN_MUTATIONS:
+            for match in re.finditer(pattern, code):
+                add(line_number, match.span(), new_op, old_op, new_op,
+                    CLASS_BOOLEAN)
+        for match in _INT_LITERAL.finditer(code):
+            value = int(match.group(1))
+            for delta in (1, -1):
+                add(line_number, match.span(), str(value + delta),
+                    str(value), str(value + delta), CLASS_CONSTANT)
+
+    # Operator swaps first, then boolean logic, then constants; within a
+    # class, try `return` lines first — the buggy expression is most
+    # often there.
     candidates.sort(
-        key=lambda c: 0 if "return" in _changed_line(c) else 1
+        key=lambda c: (c.class_rank, 0 if "return" in _changed_line(c) else 1)
     )
     return candidates
 

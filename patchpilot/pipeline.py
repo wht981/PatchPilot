@@ -49,6 +49,10 @@ DRY_RUN = "dry_run"
 
 SUCCESS_STATUSES = (FIXED, ALREADY_PASSING, DRY_RUN)
 
+# Verified candidate patches tried per repair round: the initial round
+# and each debug round may each consume up to this many candidates.
+CANDIDATES_PER_ROUND = 6
+
 
 def run_pipeline(
     repo_path: str,
@@ -228,7 +232,7 @@ def _run_heuristic_repair(
         )
         return None
 
-    max_attempts = 1 + max(0, max_debug_rounds)
+    max_attempts = (1 + max(0, max_debug_rounds)) * CANDIDATES_PER_ROUND
     for attempt, candidate in enumerate(candidates[:max_attempts], start=1):
         patch, test = _try_candidate(
             runner, candidate, context.repo_path, commands, policy,

@@ -1,8 +1,8 @@
 """Safety boundary for autonomous command execution.
 
-Distilled from the OpenHands SDK security analyzer: commands are risk-
-classified before execution, dangerous commands are refused outright,
-and secrets are masked before anything reaches logs or reports.
+Commands are risk-classified before execution, dangerous commands are
+refused outright, and secrets are masked before anything reaches logs
+or reports.
 """
 
 from __future__ import annotations

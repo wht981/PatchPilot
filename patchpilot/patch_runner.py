@@ -7,9 +7,6 @@ arithmetic/comparison operator swaps, boolean `and`/`or` swaps, and
 off-by-one integer constants. Each candidate patch touches exactly one
 token in one file, records the original content, and produces a unified
 diff. Files outside the repository root are never modified.
-
-The pluggable OpenHands engine (see patchpilot.engines) replaces this
-strategy with a real LLM agent; the pipeline contract is the same.
 """
 
 from __future__ import annotations

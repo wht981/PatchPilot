@@ -1,9 +1,9 @@
 """Execution tracing for PatchPilot runs.
 
-Distilled from the OpenHands SDK event log: every pipeline step appends
-an immutable, timestamped event, and the whole trace is persisted as
-JSON so a run can be audited after the fact. All payloads pass through
-the security policy's secret masking before being stored.
+Every pipeline step appends an immutable, timestamped event, and the
+whole trace is persisted as JSON so a run can be audited after the
+fact. All payloads pass through the security policy's secret masking
+before being stored.
 """
 
 from __future__ import annotations

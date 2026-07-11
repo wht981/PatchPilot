@@ -1,7 +1,6 @@
 """Bounded command execution inside the repo workspace.
 
-Distilled from the OpenHands SDK LocalWorkspace.execute_command contract:
-every command is validated by the security policy, runs with the repo as
+Every command is validated by the security policy, runs with the repo as
 its working directory, is killed on timeout, and returns a typed
 CommandExecution with stdout/stderr/exit code/duration.
 """

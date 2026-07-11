@@ -1,8 +1,8 @@
 """Repair planning.
 
-The Planner is a pluggable interface: the default HeuristicPlanner is
-deterministic and dependency-free; the OpenHands engine provides an
-LLM-backed planner with the same contract (see patchpilot.engines).
+The Planner is a pluggable interface; HeuristicPlanner is the default,
+deterministic, dependency-free implementation. An alternative planner
+only needs to provide ``create_repair_plan(issue, context)``.
 """
 
 from __future__ import annotations

@@ -4,17 +4,17 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-PatchPilot is a **test-verified autonomous coding agent** built on the
-[OpenHands Software Agent SDK](https://github.com/OpenHands/software-agent-sdk).
+PatchPilot is a **standalone, test-verified autonomous coding agent**.
 It reads an issue, navigates the repository, plans a repair, edits code,
-runs the tests, debugs on failure, and produces an auditable patch report.
+runs the tests, debugs on failure, and produces an auditable patch report
+— with **zero runtime dependencies**, so it runs on stock Python.
 
-The core pipeline is a *distilled* implementation of the OpenHands kernel
-contracts — typed action/observation records, an immutable event trace,
-bounded command execution inside the workspace, and risk-classified
-security policies — with **zero runtime dependencies**, so the demo runs
-on stock Python. A pluggable engine swaps the deterministic heuristics
-for a real OpenHands LLM agent.
+The design follows the kernel contracts of modern software agent
+runtimes (the architecture is distilled from a deep study of the
+[OpenHands Software Agent SDK](https://github.com/OpenHands/software-agent-sdk),
+without depending on it): typed action/observation records, an immutable
+event trace, bounded command execution inside the workspace, and
+risk-classified security policies.
 
 ## Features
 
@@ -61,30 +61,22 @@ Issue Loader -> Repo Context Builder -> Planner -> Patch Runner
 | `security.py` | command risk policy + secret masking |
 | `tracing.py` | JSON event trace of the whole run |
 | `eval_runner.py` | evaluation harness |
-| `engines/openhands_engine.py` | optional LLM engine on the OpenHands SDK |
 
-**Engines.** The default `heuristic` engine is deterministic and offline:
-it localizes the fault from failing tests and issue keywords, then applies
+**Repair strategy.** The engine is deterministic and offline: it
+localizes the fault from failing tests and issue keywords, then applies
 bounded single-token mutations (operator swaps, `and`/`or` logic swaps,
-off-by-one integer constants) that must pass the test suite. The
-`openhands` engine delegates planning and editing to a real OpenHands
-agent (file editor + terminal tools); PatchPilot still performs the final
-test verification itself.
+off-by-one integer constants) that must pass the test suite. Failed
+candidates are reverted; a fix is only ever delivered after the whole
+suite passes. The planner is a small pluggable interface, so an
+LLM-backed strategy can be added later without touching the pipeline.
 
 ## Installation
 
-No dependencies are required for the default engine (Python >= 3.9):
+No dependencies — standard library only (Python >= 3.9):
 
 ```bash
 cd PatchPilot
 python -m patchpilot --help
-```
-
-Optional, for the LLM-backed engine (Python >= 3.13):
-
-```bash
-pip install -e ".[openhands]"
-export LLM_API_KEY=...   # never hardcoded or committed
 ```
 
 ## Quick Start
@@ -98,9 +90,9 @@ python -m patchpilot run \
 ```
 
 Flags: `--repo`, `--issue`, `--output`, `--trace`, `--max-debug-rounds`,
-`--dry-run` (plan only, no edits, no tests), `--engine {heuristic,openhands}`,
+`--dry-run` (plan only, no edits, no tests),
 `--no-apply` / `--in-place` / `--patch-file` (fix delivery, see below),
-`--verbose`.
+`--json`, `--verbose`.
 
 **Fix delivery.** By default, if the target repo is a clean git
 repository, the verified fix is committed on a new
@@ -182,16 +174,18 @@ stderr), and exit codes are CI-friendly: **0** = fixed / already passing
 
 - Repos must be local (GitHub issues can be fetched by URL, but the
   repository itself is not cloned automatically).
-- The heuristic engine repairs small single-token logic bugs (operators,
-  boolean logic, off-by-one constants); complex
-  or multi-file bugs need the OpenHands engine.
+- The mutation engine repairs small single-token logic bugs (operators,
+  boolean logic, off-by-one constants); complex or multi-file bugs are
+  reported honestly as `not_fixed` / `no_safe_repair` instead of being
+  guessed at.
 - Test detection covers pytest/unittest, `npm test`, and compile checks.
 - Large repos may need stronger retrieval than keyword ranking.
 
 ## Roadmap
 
-- GitHub issue URL support and automatic PR creation.
-- Deeper OpenHands SDK integration (condensers, sandboxed workspaces).
+- Automatic PR creation for delivered fix branches.
+- An optional LLM-backed planner/repair strategy behind the existing
+  pluggable planner interface.
 - Embedding-based file retrieval for large repositories.
 - Benchmark dataset and a richer failure taxonomy.
-- Sandbox hardening (containerized execution via openhands-workspace).
+- Sandbox hardening (containerized command execution).

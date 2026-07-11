@@ -4,20 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "patchpilot"
-version = "0.2.0"
-description = "PatchPilot: a test-verified autonomous coding agent built on the OpenHands Software Agent SDK"
+version = "0.3.0"
+description = "PatchPilot: a standalone, test-verified autonomous coding agent with zero runtime dependencies"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "haotian" }]
-keywords = ["agent", "autonomous", "program-repair", "openhands"]
-# The default heuristic engine is dependency-free (stdlib only).
+keywords = ["agent", "autonomous", "program-repair", "automated-testing"]
+# Standard library only, by design.
 dependencies = []
-
-[project.optional-dependencies]
-# Real agent engine backed by the OpenHands Software Agent SDK.
-# Requires Python >= 3.13 and an LLM_API_KEY at runtime.
-openhands = ["openhands-sdk", "openhands-tools"]
 
 [project.scripts]
 patchpilot = "patchpilot.cli:main"

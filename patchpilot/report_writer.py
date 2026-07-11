@@ -22,6 +22,39 @@ def write_report(result: PatchPilotResult, output_path: str) -> None:
     Path(output_path).write_text(render_report(result), encoding="utf-8")
 
 
+def result_summary_dict(result: PatchPilotResult) -> dict:
+    """Machine-readable run summary for ``--json`` / CI consumers."""
+    kept = result.kept_changes
+    tests = {}
+    if result.baseline_test is not None:
+        tests["baseline"] = result.baseline_test.summary
+    final_tests = [result.initial_test] + [r.test for r in result.debug_rounds]
+    final_tests = [t for t in final_tests if t is not None]
+    if final_tests:
+        tests["final"] = final_tests[-1].summary
+    delivery = None
+    if result.delivery is not None:
+        delivery = {
+            "mode": result.delivery.mode,
+            "branch": result.delivery.branch,
+            "commit": result.delivery.commit,
+            "patch_path": result.delivery.patch_path,
+            "note": result.delivery.note,
+        }
+    return {
+        "final_status": result.final_status,
+        "success": result.final_status in ("fixed", "already_passing", "dry_run"),
+        "issue": {"title": result.issue.title, "source": result.issue.path},
+        "repo": result.repo_context.repo_path,
+        "changed_files": [{"path": c.path, "reason": c.reason} for c in kept],
+        "diff": "".join(c.diff for c in kept),
+        "tests": tests,
+        "debug_rounds": len(result.debug_rounds),
+        "commands_executed": len(result.all_commands),
+        "delivery": delivery,
+    }
+
+
 def render_report(result: PatchPilotResult) -> str:
     sections: List[str] = ["# PatchPilot Repair Report", ""]
 

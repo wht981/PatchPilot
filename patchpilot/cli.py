@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
@@ -80,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="heuristic",
         help="repair engine (openhands requires the SDK and LLM_API_KEY)",
     )
+    run.add_argument(
+        "--json",
+        action="store_true",
+        help="print a machine-readable JSON summary to stdout (for CI)",
+    )
     run.add_argument("--verbose", action="store_true", help="verbose logging")
 
     ev = subparsers.add_parser("eval", help="run the evaluation harness")
@@ -95,53 +101,87 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="max debug rounds per task (default: 1)",
     )
+    ev.add_argument(
+        "--json",
+        action="store_true",
+        help="print machine-readable JSON results to stdout (for CI)",
+    )
     ev.add_argument("--verbose", action="store_true", help="verbose logging")
     return parser
 
 
 def main(argv: "list[str] | None" = None) -> int:
+    """Exit codes: 0 = success (fixed / already passing / dry run, or all
+    eval tasks passed); 1 = the repair or some eval task failed;
+    2 = usage or runtime error."""
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    if args.command == "run":
-        from patchpilot.pipeline import SUCCESS_STATUSES, run_pipeline
+    try:
+        if args.command == "run":
+            return _run_command(args)
+        if args.command == "eval":
+            return _eval_command(args)
+        return 2
+    except Exception as exc:
+        print(f"patchpilot error: {exc}", file=sys.stderr)
+        if args.verbose:
+            raise
+        return 2
 
-        apply_mode = "auto"
-        if args.no_apply:
-            apply_mode = "no_apply"
-        elif args.in_place:
-            apply_mode = "in_place"
-        result = run_pipeline(
-            repo_path=args.repo,
-            issue_path=args.issue,
-            output_path=args.output,
-            trace_path=args.trace,
-            max_debug_rounds=args.max_debug_rounds,
-            dry_run=args.dry_run,
-            engine=args.engine,
-            apply_mode=apply_mode,
-            patch_file=args.patch_file,
-        )
+
+def _run_command(args: argparse.Namespace) -> int:
+    from patchpilot.pipeline import SUCCESS_STATUSES, run_pipeline
+    from patchpilot.report_writer import result_summary_dict
+
+    apply_mode = "auto"
+    if args.no_apply:
+        apply_mode = "no_apply"
+    elif args.in_place:
+        apply_mode = "in_place"
+    result = run_pipeline(
+        repo_path=args.repo,
+        issue_path=args.issue,
+        output_path=args.output,
+        trace_path=args.trace,
+        max_debug_rounds=args.max_debug_rounds,
+        dry_run=args.dry_run,
+        engine=args.engine,
+        apply_mode=apply_mode,
+        patch_file=args.patch_file,
+    )
+    if args.json:
+        summary = result_summary_dict(result)
+        summary["report_path"] = args.output
+        summary["trace_path"] = args.trace
+        print(json.dumps(summary, indent=2))
+    else:
         print(f"Final status: {result.final_status}")
         if result.delivery is not None:
             print(f"Delivery: {result.delivery.note}")
         print(f"Report written to: {args.output}")
-        return 0 if result.final_status in SUCCESS_STATUSES else 1
-    if args.command == "eval":
-        from patchpilot.eval_runner import run_eval
+    return 0 if result.final_status in SUCCESS_STATUSES else 1
 
-        summary = run_eval(
-            tasks_dir=args.tasks,
-            output_dir=args.output_dir,
-            max_debug_rounds=args.max_debug_rounds,
-        )
+
+def _eval_command(args: argparse.Namespace) -> int:
+    from patchpilot.eval_runner import run_eval
+
+    summary = run_eval(
+        tasks_dir=args.tasks,
+        output_dir=args.output_dir,
+        max_debug_rounds=args.max_debug_rounds,
+    )
+    if args.json:
+        from dataclasses import asdict
+
+        print(json.dumps(asdict(summary), indent=2))
+    else:
         print(f"Eval finished: {summary.passed}/{summary.total} tasks passed")
         print(f"Results written to: {args.output_dir}")
-        return 0 if summary.passed == summary.total else 1
-    return 2
+    return 0 if summary.passed == summary.total else 1
 
 
 if __name__ == "__main__":

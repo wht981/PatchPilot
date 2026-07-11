@@ -48,7 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-debug-rounds",
         type=int,
         default=1,
-        help="max debug rounds after the initial repair attempt (default: 1)",
+        help=(
+            "max debug rounds after the initial round; each round tries up "
+            "to 6 test-verified candidate patches (default: 1)"
+        ),
     )
     run.add_argument(
         "--dry-run",

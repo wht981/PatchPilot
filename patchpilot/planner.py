@@ -23,7 +23,7 @@ class HeuristicPlanner:
             )
             proposed = (
                 "Run the test suite to capture the failing behavior, then apply "
-                "bounded single-operator mutations inside the suspect functions "
+                "bounded single-token mutations inside the suspect functions "
                 f"of {context.candidate_files[0]} and re-verify with the tests. "
                 "Revert any mutation that does not make the suite pass."
             )

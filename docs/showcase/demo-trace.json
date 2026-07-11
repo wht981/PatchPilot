@@ -1,0 +1,109 @@
+{
+  "events": [
+    {
+      "time": "2026-07-11T04:57:38.469347+00:00",
+      "type": "issue_loaded",
+      "data": {
+        "path": "examples/sample_issue.md",
+        "title": "Bug: calculator add function returns the wrong result"
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:38.472641+00:00",
+      "type": "repo_scanned",
+      "data": {
+        "repo": "/private/var/folders/vd/fl75jlcn239cvhx64534dzwh0000gn/T/tmp.NjxWjnxAf4/calculator-demo",
+        "files": 3,
+        "candidate_files": [
+          "calculator.py"
+        ],
+        "keywords": [
+          "add",
+          "calculator",
+          "sum",
+          "two",
+          "numbers",
+          "for",
+          "example",
+          "does"
+        ]
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:38.472981+00:00",
+      "type": "plan_created",
+      "data": {
+        "candidate_files": [
+          "calculator.py"
+        ]
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:38.627631+00:00",
+      "type": "git_state_detected",
+      "data": {
+        "is_repo": true,
+        "is_clean": true,
+        "branch": "main"
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:38.629222+00:00",
+      "type": "tests_detected",
+      "data": {
+        "commands": [
+          "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest discover -v"
+        ]
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.099833+00:00",
+      "type": "baseline_tests",
+      "data": {
+        "passed": false,
+        "summary": "1 of 1 command(s) failed (/Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest discover -v: exit code 1)."
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.104209+00:00",
+      "type": "candidates_proposed",
+      "data": {
+        "count": 3
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.105204+00:00",
+      "type": "patch_applied",
+      "data": {
+        "attempt": 1,
+        "description": "swap `-` -> `+` in `add` (calculator.py:5)"
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.627737+00:00",
+      "type": "tests_run",
+      "data": {
+        "attempt": 1,
+        "passed": true,
+        "summary": "All 1 test command(s) passed."
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.910793+00:00",
+      "type": "fix_delivered",
+      "data": {
+        "mode": "branch",
+        "branch": "patchpilot/fix-bug-calculator-add-function-returns-the",
+        "patch_path": "",
+        "note": "fix committed on branch patchpilot/fix-bug-calculator-add-function-returns-the (0d99715); the original branch is unchanged"
+      }
+    },
+    {
+      "time": "2026-07-11T04:57:39.910875+00:00",
+      "type": "final_status",
+      "data": {
+        "status": "fixed"
+      }
+    }
+  ]
+}

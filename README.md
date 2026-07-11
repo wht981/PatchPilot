@@ -120,6 +120,10 @@ returns `a - b`. PatchPilot reads `examples/sample_issue.md`, localizes
 `patchpilot_report.md` plus `patchpilot_trace.json`. The run modifies the
 sample repo in place; restore the bug with `git checkout -- examples/sample_repo`.
 
+The unedited report and trace from a real run — including branch-based
+fix delivery on a clean git repo — are in
+[`docs/showcase/`](docs/showcase/README.md).
+
 ## Running Tests
 
 ```bash

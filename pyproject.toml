@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "patchpilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "PatchPilot: a test-verified autonomous coding agent built on the OpenHands Software Agent SDK"
 readme = "README.md"
 requires-python = ">=3.9"

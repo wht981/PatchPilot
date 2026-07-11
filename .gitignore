@@ -13,4 +13,5 @@ build/
 # PatchPilot generated artifacts
 patchpilot_report.md
 patchpilot_trace.json
+patchpilot_fix.patch
 eval_results/

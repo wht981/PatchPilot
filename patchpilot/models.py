@@ -97,6 +97,17 @@ class DebugRound:
 
 
 @dataclass
+class Delivery:
+    """How a verified fix was handed to the user."""
+
+    mode: str  # "branch" | "in_place" | "patch_file"
+    branch: str = ""
+    commit: str = ""
+    patch_path: str = ""
+    note: str = ""
+
+
+@dataclass
 class PatchPilotResult:
     """Full result of a PatchPilot run, consumed by the report writer."""
 
@@ -109,6 +120,7 @@ class PatchPilotResult:
     debug_rounds: List[DebugRound] = field(default_factory=list)
     final_status: str = "unknown"
     dry_run: bool = False
+    delivery: Optional[Delivery] = None
 
     @property
     def all_commands(self) -> List[CommandExecution]:
@@ -130,3 +142,11 @@ class PatchPilotResult:
             if round_.patch is not None:
                 changes.extend(round_.patch.changed_files)
         return changes
+
+    @property
+    def kept_changes(self) -> List[FileChange]:
+        """The verified changes that made the suite pass (empty unless fixed)."""
+        if self.final_status != "fixed":
+            return []
+        kept = [c for c in self.all_changed_files if "reverted" not in c.reason]
+        return kept[-1:] if kept else []

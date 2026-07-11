@@ -100,14 +100,7 @@ def _plan(result: PatchPilotResult) -> str:
 
 
 def _kept_changes(result: PatchPilotResult) -> list:
-    if result.final_status != "fixed":
-        return []
-    kept = []
-    for change in result.all_changed_files:
-        if "reverted" not in change.reason:
-            kept.append(change)
-    # The last verified change is the one that made the suite pass.
-    return kept[-1:] if kept else []
+    return result.kept_changes
 
 
 def _files_changed(result: PatchPilotResult) -> str:
@@ -180,7 +173,10 @@ def _failure_analysis(result: PatchPilotResult) -> str:
 
 
 def _final_status(result: PatchPilotResult) -> str:
-    return _STATUS_LINES.get(result.final_status, result.final_status)
+    line = _STATUS_LINES.get(result.final_status, result.final_status)
+    if result.delivery is not None:
+        line += f"\n\n**Delivery:** {result.delivery.note}"
+    return line
 
 
 def _pr_draft(result: PatchPilotResult) -> str:

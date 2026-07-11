@@ -133,6 +133,31 @@ modified. Results land in `eval_results/results.json` and
 `eval_results/summary.md` (success rate, runtime, commands, patch size,
 failure taxonomy).
 
+## CI Usage
+
+`--json` prints a machine-readable summary to stdout (logs go to
+stderr), and exit codes are CI-friendly: **0** = fixed / already passing
+/ dry run, **1** = repair failed, **2** = usage or runtime error.
+
+```yaml
+# .github/workflows/patchpilot.yml (excerpt)
+- name: Attempt automatic repair
+  run: |
+    python -m patchpilot run \
+      --repo . \
+      --issue "$ISSUE_URL" \
+      --no-apply --patch-file fix.patch \
+      --json > patchpilot.json
+- name: Upload proposed patch
+  uses: actions/upload-artifact@v4
+  with:
+    name: patchpilot-fix
+    path: |
+      fix.patch
+      patchpilot.json
+      patchpilot_report.md
+```
+
 ## Safety Controls
 
 - **Command risk classification** (`safe` / `caution` / `dangerous`);

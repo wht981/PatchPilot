@@ -21,6 +21,10 @@ for a real OpenHands LLM agent.
   files, proposed changes, test strategy, and risk notes.
 - **Test-verified repair** — every patch must make the detected test
   commands pass; failed attempts are automatically reverted.
+- **Safe patch delivery** — on a clean git repo the verified fix is
+  committed to a `patchpilot/fix-<slug>` branch and your branch stays
+  untouched; `--no-apply` writes a `.patch` file and restores the repo
+  instead, `--in-place` edits the working tree directly.
 - **Bounded debug loop** — on failure, analyzes test output and retries with
   a new hypothesis, up to `--max-debug-rounds` (never unbounded).
 - **Patch reports** — a full markdown report with diff, commands, test
@@ -88,7 +92,18 @@ python -m patchpilot run \
 
 Flags: `--repo`, `--issue`, `--output`, `--trace`, `--max-debug-rounds`,
 `--dry-run` (plan only, no edits, no tests), `--engine {heuristic,openhands}`,
+`--no-apply` / `--in-place` / `--patch-file` (fix delivery, see below),
 `--verbose`.
+
+**Fix delivery.** By default, if the target repo is a clean git
+repository, the verified fix is committed on a new
+`patchpilot/fix-<issue-slug>` branch and your original branch is left
+untouched (merge with `git merge` or drop the branch to reject the fix).
+If the repo is not a git repository or has uncommitted changes,
+PatchPilot falls back to in-place editing and says so in the report.
+With `--no-apply` the fix is written to a patch file
+(`--patch-file`, default `patchpilot_fix.patch`) and the repository is
+restored — apply it later with `git apply patchpilot_fix.patch`.
 
 ## Running the Sample
 

@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -73,10 +75,31 @@ def run_tests(
     if not commands:
         return TestResult(commands=[], passed=False, summary="No test command detected.")
 
+    # Hermetic verification: stale .pyc files can silently execute the
+    # pre-patch code when a patch write keeps the same file size within
+    # the same mtime second (CPython's timestamp-based cache check),
+    # making a correct fix look like a failure. Bytecode caches may also
+    # live outside the repo (e.g. Apple's Python uses a pycache prefix
+    # under ~/Library/Caches), so purging __pycache__ is not enough:
+    # point every verification run at a fresh, empty cache prefix and
+    # forbid writing new bytecode.
+    _purge_bytecode_caches(repo_path)
+    cache_prefix = tempfile.mkdtemp(prefix="patchpilot_pyc_")
+    hermetic_env = {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPYCACHEPREFIX": cache_prefix,
+    }
+
     executions: List[CommandExecution] = []
-    for command in commands:
-        execution = run_command(command, repo_path, timeout=timeout, policy=policy)
-        executions.append(execution)
+    try:
+        for command in commands:
+            execution = run_command(
+                command, repo_path, timeout=timeout, policy=policy,
+                extra_env=hermetic_env,
+            )
+            executions.append(execution)
+    finally:
+        shutil.rmtree(cache_prefix, ignore_errors=True)
 
     passed = all(e.exit_code == 0 for e in executions)
     failed = [e for e in executions if e.exit_code != 0]
@@ -87,6 +110,11 @@ def run_tests(
         detail = "timed out" if first.timed_out else f"exit code {first.exit_code}"
         summary = f"{len(failed)} of {len(executions)} command(s) failed ({first.command}: {detail})."
     return TestResult(commands=executions, passed=passed, summary=summary)
+
+
+def _purge_bytecode_caches(repo_path: str) -> None:
+    for pycache in Path(repo_path).rglob("__pycache__"):
+        shutil.rmtree(pycache, ignore_errors=True)
 
 
 def failure_output(result: TestResult) -> str:

@@ -8,6 +8,7 @@ CommandExecution with stdout/stderr/exit code/duration.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -26,11 +27,13 @@ def run_command(
     repo_path: str,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     policy: Optional[SecurityPolicy] = None,
+    extra_env: "Optional[dict]" = None,
 ) -> CommandExecution:
     """Run ``command`` inside ``repo_path`` with a hard timeout.
 
     Raises SecurityError (via the policy) before anything executes if the
-    command is classified as dangerous.
+    command is classified as dangerous. ``extra_env`` entries are overlaid
+    on the inherited environment.
     """
     policy = policy or SecurityPolicy()
     policy.validate_command(command)
@@ -38,6 +41,11 @@ def run_command(
     repo = Path(repo_path).resolve()
     if not repo.is_dir():
         raise NotADirectoryError(f"Workspace does not exist: {repo_path}")
+
+    env = None
+    if extra_env:
+        env = dict(os.environ)
+        env.update(extra_env)
 
     start = time.monotonic()
     timed_out = False
@@ -49,6 +57,7 @@ def run_command(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         exit_code = completed.returncode
         stdout, stderr = completed.stdout, completed.stderr

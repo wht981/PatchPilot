@@ -1,5 +1,9 @@
 # PatchPilot
 
+[![CI](https://github.com/wht981/PatchPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/wht981/PatchPilot/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 PatchPilot is a **test-verified autonomous coding agent** built on the
 [OpenHands Software Agent SDK](https://github.com/OpenHands/software-agent-sdk).
 It reads an issue, navigates the repository, plans a repair, edits code,

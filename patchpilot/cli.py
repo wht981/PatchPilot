@@ -47,6 +47,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="analyze and plan only; do not modify files or run tests",
     )
+    apply_group = run.add_mutually_exclusive_group()
+    apply_group.add_argument(
+        "--no-apply",
+        action="store_true",
+        help="write the verified fix to a patch file and restore the repo",
+    )
+    apply_group.add_argument(
+        "--in-place",
+        action="store_true",
+        help="leave the fix in the working tree (skip the auto fix branch)",
+    )
+    run.add_argument(
+        "--patch-file",
+        default="patchpilot_fix.patch",
+        help="patch file path used with --no-apply (default: patchpilot_fix.patch)",
+    )
     run.add_argument(
         "--engine",
         choices=["heuristic", "openhands"],
@@ -82,6 +98,11 @@ def main(argv: "list[str] | None" = None) -> int:
     if args.command == "run":
         from patchpilot.pipeline import SUCCESS_STATUSES, run_pipeline
 
+        apply_mode = "auto"
+        if args.no_apply:
+            apply_mode = "no_apply"
+        elif args.in_place:
+            apply_mode = "in_place"
         result = run_pipeline(
             repo_path=args.repo,
             issue_path=args.issue,
@@ -90,8 +111,12 @@ def main(argv: "list[str] | None" = None) -> int:
             max_debug_rounds=args.max_debug_rounds,
             dry_run=args.dry_run,
             engine=args.engine,
+            apply_mode=apply_mode,
+            patch_file=args.patch_file,
         )
         print(f"Final status: {result.final_status}")
+        if result.delivery is not None:
+            print(f"Delivery: {result.delivery.note}")
         print(f"Report written to: {args.output}")
         return 0 if result.final_status in SUCCESS_STATUSES else 1
     if args.command == "eval":

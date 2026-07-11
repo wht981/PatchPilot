@@ -12,9 +12,19 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
+from patchpilot.git_workflow import (
+    AUTO,
+    IN_PLACE,
+    NO_APPLY,
+    GitState,
+    commit_fix_on_branch,
+    detect_git_state,
+    write_patch_file,
+)
 from patchpilot.issue_loader import load_issue
 from patchpilot.models import (
     DebugRound,
+    Delivery,
     PatchPilotResult,
     PatchResult,
     TestResult,
@@ -49,6 +59,8 @@ def run_pipeline(
     dry_run: bool = False,
     engine: str = "heuristic",
     test_timeout: float = 120.0,
+    apply_mode: str = AUTO,
+    patch_file: str = "patchpilot_fix.patch",
 ) -> PatchPilotResult:
     policy = SecurityPolicy()
     tracer = Tracer(policy)
@@ -81,6 +93,14 @@ def run_pipeline(
         _finish(result, tracer, output_path, trace_path)
         return result
 
+    git_state = detect_git_state(context.repo_path, policy)
+    tracer.record(
+        "git_state_detected",
+        is_repo=git_state.is_repo,
+        is_clean=git_state.is_clean,
+        branch=git_state.current_branch,
+    )
+
     commands = detect_test_commands(context.repo_path)
     tracer.record("tests_detected", commands=commands)
     if not commands:
@@ -107,18 +127,76 @@ def run_pipeline(
         _finish(result, tracer, output_path, trace_path)
         return result
 
+    revert_fix = None
     if engine == "openhands":
         _run_openhands_repair(
             result, commands, policy, tracer, max_debug_rounds, test_timeout
         )
     else:
-        _run_heuristic_repair(
+        revert_fix = _run_heuristic_repair(
             result, commands, policy, tracer, max_debug_rounds, test_timeout
+        )
+
+    if result.final_status == FIXED:
+        result.delivery = _deliver_fix(
+            result, git_state, apply_mode, patch_file, revert_fix, policy
+        )
+        tracer.record(
+            "fix_delivered",
+            mode=result.delivery.mode,
+            branch=result.delivery.branch,
+            patch_path=result.delivery.patch_path,
+            note=result.delivery.note,
         )
 
     tracer.record("final_status", status=result.final_status)
     _finish(result, tracer, output_path, trace_path)
     return result
+
+
+def _deliver_fix(
+    result: PatchPilotResult,
+    git_state: GitState,
+    apply_mode: str,
+    patch_file: str,
+    revert_fix,
+    policy: SecurityPolicy,
+) -> Delivery:
+    """Hand the verified fix to the user according to ``apply_mode``."""
+    repo_path = result.repo_context.repo_path
+    kept = result.kept_changes
+
+    if apply_mode == NO_APPLY:
+        delivery = write_patch_file(kept, patch_file)
+        if revert_fix is not None:
+            revert_fix()
+        elif git_state.is_repo:
+            from patchpilot.execution import run_command
+
+            run_command("git checkout -- .", repo_path, timeout=15, policy=policy)
+        else:
+            delivery.note += (
+                " (warning: the fix could not be reverted automatically; "
+                "the working tree still contains it)"
+            )
+        return delivery
+
+    if apply_mode == IN_PLACE:
+        return Delivery(mode=IN_PLACE, note="fix applied to the working tree")
+
+    # auto mode
+    if git_state.is_repo and git_state.is_clean:
+        return commit_fix_on_branch(
+            repo_path, kept, result.issue.title, policy=policy
+        )
+    if git_state.is_repo:
+        reason = "the working tree had uncommitted changes before the repair"
+    else:
+        reason = "the target is not the root of a git repository"
+    return Delivery(
+        mode=IN_PLACE,
+        note=f"fix applied in place ({reason}, so no fix branch was created)",
+    )
 
 
 def _run_heuristic_repair(
@@ -128,8 +206,12 @@ def _run_heuristic_repair(
     tracer: Tracer,
     max_debug_rounds: int,
     test_timeout: float,
-) -> None:
-    """Bounded candidate loop: one verified mutation per attempt."""
+):
+    """Bounded candidate loop: one verified mutation per attempt.
+
+    Returns a zero-argument revert callable for the winning candidate
+    when the repair succeeds (used by ``--no-apply``), else None.
+    """
     context, plan = result.repo_context, result.plan
     assert result.baseline_test is not None
     failure_text = failure_output(result.baseline_test)
@@ -144,7 +226,7 @@ def _run_heuristic_repair(
             "final_status_reason",
             reason="no safe candidate patch could be proposed",
         )
-        return
+        return None
 
     max_attempts = 1 + max(0, max_debug_rounds)
     for attempt, candidate in enumerate(candidates[:max_attempts], start=1):
@@ -165,10 +247,11 @@ def _run_heuristic_repair(
             )
         if test.passed:
             result.final_status = FIXED
-            return
+            return lambda: runner.revert(candidate)
         failure_text = failure_output(test) or failure_text
 
     result.final_status = NOT_FIXED
+    return None
 
 
 def _try_candidate(

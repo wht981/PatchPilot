@@ -61,7 +61,8 @@ Issue Loader -> Repo Context Builder -> Planner -> Patch Runner
 
 **Engines.** The default `heuristic` engine is deterministic and offline:
 it localizes the fault from failing tests and issue keywords, then applies
-bounded single-operator mutations that must pass the test suite. The
+bounded single-token mutations (operator swaps, `and`/`or` logic swaps,
+off-by-one integer constants) that must pass the test suite. The
 `openhands` engine delegates planning and editing to a real OpenHands
 agent (file editor + terminal tools); PatchPilot still performs the final
 test verification itself.
@@ -148,7 +149,8 @@ failure taxonomy).
 
 - Repos must be local (GitHub issues can be fetched by URL, but the
   repository itself is not cloned automatically).
-- The heuristic engine repairs small, single-operator logic bugs; complex
+- The heuristic engine repairs small single-token logic bugs (operators,
+  boolean logic, off-by-one constants); complex
   or multi-file bugs need the OpenHands engine.
 - Test detection covers pytest/unittest, `npm test`, and compile checks.
 - Large repos may need stronger retrieval than keyword ranking.

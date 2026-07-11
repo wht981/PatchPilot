@@ -25,7 +25,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="repair a repo based on an issue file")
     run.add_argument("--repo", required=True, help="path to the local repository")
-    run.add_argument("--issue", required=True, help="path to the issue markdown file")
+    run.add_argument(
+        "--issue",
+        required=True,
+        help=(
+            "issue markdown file path, or a GitHub issue URL "
+            "(https://github.com/<owner>/<repo>/issues/<n>; set GITHUB_TOKEN "
+            "for private repos)"
+        ),
+    )
     run.add_argument(
         "--output",
         default="patchpilot_report.md",

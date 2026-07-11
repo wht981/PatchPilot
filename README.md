@@ -14,7 +14,9 @@ for a real OpenHands LLM agent.
 
 ## Features
 
-- **Issue understanding** — parses local markdown issues into typed records.
+- **Issue understanding** — parses local markdown issues or fetches
+  GitHub issue URLs directly (`--issue https://github.com/o/r/issues/1`,
+  zero extra dependencies; `GITHUB_TOKEN` supported for private repos).
 - **Repository navigation** — scans the repo (skipping VCS metadata, caches,
   and binaries) and ranks candidate files against issue keywords.
 - **Planning** — produces a repair plan: root cause hypothesis, candidate
@@ -144,7 +146,8 @@ failure taxonomy).
 
 ## Limitations
 
-- Only local repos and local markdown issues (no GitHub API yet).
+- Repos must be local (GitHub issues can be fetched by URL, but the
+  repository itself is not cloned automatically).
 - The heuristic engine repairs small, single-operator logic bugs; complex
   or multi-file bugs need the OpenHands engine.
 - Test detection covers pytest/unittest, `npm test`, and compile checks.

@@ -80,11 +80,23 @@ class TestAutoDelivery(GitRepoFixture):
 
     def test_dirty_tree_falls_back_to_in_place(self):
         self._init_git()
-        (self.repo / "notes.txt").write_text("wip\n")
+        # A modified *tracked* file makes the tree dirty.
+        (self.repo / "README.md").write_text("locally edited\n")
         result = self._run()
         assert result.delivery is not None
         self.assertEqual(result.delivery.mode, "in_place")
         self.assertIn("uncommitted changes", result.delivery.note)
+
+    def test_untracked_files_do_not_block_branch_delivery(self):
+        self._init_git()
+        # Untracked files (e.g. tool output like result.json) are harmless:
+        # the fix commit only adds the files PatchPilot changed.
+        (self.repo / "result.json").write_text("{}\n")
+        result = self._run()
+        assert result.delivery is not None
+        self.assertEqual(result.delivery.mode, "branch")
+        committed = _git(self.repo, "show", "--stat", "--name-only", "HEAD")
+        self.assertNotIn("result.json", committed)
 
     def test_non_git_dir_falls_back_to_in_place(self):
         result = self._run()

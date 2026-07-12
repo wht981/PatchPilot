@@ -1,0 +1,127 @@
+name: Auto Repair
+
+# Autonomous maintainer mode: when an issue is opened (or labeled
+# `patchpilot`), PatchPilot checks out the repo, tries to repair the
+# reported bug, and — only if the full test suite passes — pushes a fix
+# branch and opens a pull request. Unfixable issues get an honest
+# analysis comment instead. The long-running "watcher" is provided by
+# GitHub's event system: no daemon, no polling, one run per issue.
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_url:
+        description: "GitHub issue URL to repair"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: auto-repair-${{ github.event.issue.number || inputs.issue_url }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    # `labeled` events only proceed for the `patchpilot` label.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.action == 'opened' ||
+      github.event.label.name == 'patchpilot'
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_URL: ${{ github.event.issue.html_url || inputs.issue_url }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      # Issue titles are attacker-controlled: only ever pass them through
+      # environment variables, never interpolate into shell text.
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "haotian"
+          git config user.email "wuhaotian198321@outlook.com"
+
+      - name: Run PatchPilot
+        id: repair
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          # Write outputs outside the repo so the working tree stays clean
+          # for branch delivery.
+          python -m patchpilot run \
+            --repo . \
+            --issue "$ISSUE_URL" \
+            --output "$RUNNER_TEMP/patchpilot_report.md" \
+            --trace "$RUNNER_TEMP/patchpilot_trace.json" \
+            --max-debug-rounds 2 \
+            --json > "$RUNNER_TEMP/result.json"
+          echo "run_exit=$?" >> "$GITHUB_OUTPUT"
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "result.json")) as f:
+              result = json.load(f)
+          delivery = result.get("delivery") or {}
+          print(f"status={result['final_status']}")
+          print(f"branch={delivery.get('branch', '')}")
+          EOF
+
+      - name: Upload report and trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patchpilot-run-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/patchpilot_report.md
+            ${{ runner.temp }}/patchpilot_trace.json
+            ${{ runner.temp }}/result.json
+          if-no-files-found: ignore
+
+      - name: Push fix branch and open pull request
+        if: steps.repair.outputs.status == 'fixed' && steps.repair.outputs.branch != ''
+        id: pr
+        env:
+          FIX_BRANCH: ${{ steps.repair.outputs.branch }}
+        run: |
+          git push origin "$FIX_BRANCH"
+          {
+            if [ -n "$ISSUE_NUMBER" ]; then echo "Fixes #$ISSUE_NUMBER"; echo; fi
+            cat "$RUNNER_TEMP/patchpilot_report.md"
+          } > "$RUNNER_TEMP/pr_body.md"
+          pr_url=$(gh pr create \
+            --head "$FIX_BRANCH" \
+            --title "Fix: $ISSUE_TITLE" \
+            --body-file "$RUNNER_TEMP/pr_body.md")
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on the issue (fixed)
+        if: steps.pr.outputs.pr_url != '' && env.ISSUE_NUMBER != ''
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body \
+            "PatchPilot repaired this issue and verified the fix against the full test suite. Review the pull request: ${{ steps.pr.outputs.pr_url }}"
+
+      - name: Comment on the issue (not fixable)
+        if: steps.repair.outputs.status != 'fixed' && env.ISSUE_NUMBER != ''
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS: ${{ steps.repair.outputs.status }}
+        run: |
+          case "$STATUS" in
+            already_passing)
+              body="PatchPilot ran the full test suite and it already passes, so this issue could not be reproduced through tests. A failing test that demonstrates the bug would let PatchPilot attempt a repair." ;;
+            no_safe_repair|not_fixed)
+              body="PatchPilot attempted a repair but could not produce a patch that passes the test suite (status: \`$STATUS\`). No changes were kept. The full localization analysis and execution trace are attached to the workflow run: $RUN_URL" ;;
+            *)
+              body="PatchPilot could not process this issue (status: \`$STATUS\`). Details: $RUN_URL" ;;
+          esac
+          gh issue comment "$ISSUE_NUMBER" --body "$body"

@@ -55,8 +55,14 @@ def detect_git_state(
     if Path(toplevel.stdout.strip()).resolve() != Path(repo_path).resolve():
         return GitState(is_repo=False, is_clean=False, current_branch="")
 
+    # Untracked files must not block branch delivery: the fix commit only
+    # ever `git add`s the files PatchPilot changed, so untracked files
+    # cannot leak into it. Only tracked modifications make the tree dirty.
     status = run_command(
-        "git status --porcelain", repo_path, timeout=10, policy=policy
+        "git status --porcelain --untracked-files=no",
+        repo_path,
+        timeout=10,
+        policy=policy,
     )
     branch = run_command(
         "git rev-parse --abbrev-ref HEAD", repo_path, timeout=10, policy=policy

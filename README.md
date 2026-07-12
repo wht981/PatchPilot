@@ -133,6 +133,31 @@ modified. Results land in `eval_results/results.json` and
 `eval_results/summary.md` (success rate, runtime, commands, patch size,
 failure taxonomy).
 
+## Autonomous Maintainer Mode
+
+PatchPilot can act as an event-driven repo maintainer via
+[`.github/workflows/auto-repair.yml`](.github/workflows/auto-repair.yml):
+when an issue is opened (or labeled `patchpilot`), it checks out the
+repo, attempts a repair, and
+
+- **if the fix passes the full test suite** — pushes a
+  `patchpilot/fix-<slug>` branch, opens a pull request whose body is the
+  generated repair report, and comments on the issue with the PR link;
+- **if the suite already passes** — comments that the bug could not be
+  reproduced through tests and asks for a failing test;
+- **if no verified fix is found** — comments honestly with the status
+  and links the full report and trace (uploaded as workflow artifacts).
+
+There is no daemon and no polling: GitHub's event system provides the
+"long-running" outer loop, one idempotent run per issue. Issue titles
+are passed only through environment variables (never interpolated into
+shell), and the workflow keeps its report files outside the working
+tree so branch delivery stays clean.
+
+To try it: introduce a small logic bug on `main`, open an issue
+describing it (mention the function name in backticks), and watch the
+Actions run open a PR with a test-verified fix.
+
 ## CI Usage
 
 `--json` prints a machine-readable summary to stdout (logs go to

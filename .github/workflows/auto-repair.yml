@@ -1,6 +1,6 @@
 name: Auto Repair
 
-# Autonomous maintainer mode: when an issue is opened (or labeled
+# Autonomous maintainer mode: when an issue is labeled
 # `patchpilot`), PatchPilot checks out the repo, tries to repair the
 # reported bug, and — only if the full test suite passes — pushes a fix
 # branch and opens a pull request. Unfixable issues get an honest
@@ -9,7 +9,7 @@ name: Auto Repair
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
   workflow_dispatch:
     inputs:
       issue_url:
@@ -30,7 +30,6 @@ jobs:
     # `labeled` events only proceed for the `patchpilot` label.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.action == 'opened' ||
       github.event.label.name == 'patchpilot'
     runs-on: ubuntu-latest
     env:
@@ -40,6 +39,10 @@ jobs:
       # environment variables, never interpolate into shell text.
       ISSUE_TITLE: ${{ github.event.issue.title }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PATCHPILOT_MODEL: ${{ vars.PATCHPILOT_MODEL }}
+      PATCHPILOT_BASE_URL: ${{ vars.PATCHPILOT_BASE_URL || 'https://api.openai.com/v1' }}
+      PATCHPILOT_TOKEN_PARAMETER: ${{ vars.PATCHPILOT_TOKEN_PARAMETER || 'max_completion_tokens' }}
+      PATCHPILOT_JSON_MODE: ${{ vars.PATCHPILOT_JSON_MODE || '1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,7 +58,11 @@ jobs:
         id: repair
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATCHPILOT_API_KEY: ${{ secrets.PATCHPILOT_API_KEY }}
+          PATCHPILOT_API_KEY_ENV: PATCHPILOT_API_KEY
         run: |
+          : "${PATCHPILOT_MODEL:?Set repository variable PATCHPILOT_MODEL}"
+          : "${PATCHPILOT_API_KEY:?Set repository secret PATCHPILOT_API_KEY}"
           set +e
           # Write outputs outside the repo so the working tree stays clean
           # for branch delivery.
@@ -65,12 +72,16 @@ jobs:
             --output "$RUNNER_TEMP/patchpilot_report.md" \
             --trace "$RUNNER_TEMP/patchpilot_trace.json" \
             --max-debug-rounds 2 \
+            --max-model-calls 24 \
             --json > "$RUNNER_TEMP/result.json"
           echo "run_exit=$?" >> "$GITHUB_OUTPUT"
           python - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os
-          with open(os.path.join(os.environ["RUNNER_TEMP"], "result.json")) as f:
-              result = json.load(f)
+          try:
+              with open(os.path.join(os.environ["RUNNER_TEMP"], "result.json")) as f:
+                  result = json.load(f)
+          except (OSError, ValueError):
+              result = {"final_status": "runtime_error"}
           delivery = result.get("delivery") or {}
           print(f"status={result['final_status']}")
           print(f"branch={delivery.get('branch', '')}")

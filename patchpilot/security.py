@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import List, Pattern, Tuple
+from pathlib import PurePosixPath
+from typing import Any, Iterable, List, Pattern, Tuple
 
 
 class CommandRisk(Enum):
@@ -67,6 +68,11 @@ MASK = "[MASKED_SECRET]"
 class SecurityPolicy:
     """Classify, validate, and sanitize everything PatchPilot executes."""
 
+    def __init__(self, known_secrets: Iterable[str] = (),
+                 secret_env_vars: Iterable[str] = ()) -> None:
+        self._known_secrets = sorted((s for s in known_secrets if s), key=len, reverse=True)
+        self.secret_env_vars = tuple(secret_env_vars)
+
     def classify_command(self, command: str) -> CommandRisk:
         for pattern, _reason in _DANGEROUS_PATTERNS:
             if pattern.search(command):
@@ -91,9 +97,29 @@ class SecurityPolicy:
 
     def mask_secrets(self, text: str) -> str:
         masked = text
+        for secret in self._known_secrets:
+            masked = masked.replace(secret, MASK)
         for pattern in _SECRET_PATTERNS:
             if pattern.groups >= 3:
                 masked = pattern.sub(lambda m: f"{m.group(1)}{m.group(2)}{MASK}", masked)
             else:
                 masked = pattern.sub(MASK, masked)
         return masked
+
+    def sanitize(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return self.mask_secrets(value)
+        if isinstance(value, dict):
+            return {k: self.sanitize(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self.sanitize(v) for v in value]
+        return value
+
+
+def is_sensitive_path(relative: str) -> bool:
+    return any(
+        p in (".ssh", ".aws", ".gnupg") or p.startswith(".env")
+        or p.lower() in ("credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml")
+        or PurePosixPath(p).suffix.lower() in (".pem", ".key", ".p12", ".pfx")
+        for p in PurePosixPath(relative).parts
+    )

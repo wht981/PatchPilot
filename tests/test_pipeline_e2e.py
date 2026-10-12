@@ -23,6 +23,7 @@ class TestPipelineEndToEnd(unittest.TestCase):
 
     def _run(self, **kwargs):
         return run_pipeline(
+            engine="heuristic",
             repo_path=str(self.repo),
             issue_path=str(EXAMPLES / "sample_issue.md"),
             output_path=str(self.report),

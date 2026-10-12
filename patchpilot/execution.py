@@ -42,9 +42,12 @@ def run_command(
         raise NotADirectoryError(f"Workspace does not exist: {repo_path}")
 
     env = None
-    if extra_env:
+    if extra_env or policy.secret_env_vars:
         env = dict(os.environ)
-        env.update(extra_env)
+        for name in policy.secret_env_vars:
+            env.pop(name, None)
+        if extra_env:
+            env.update(extra_env)
 
     start = time.monotonic()
     timed_out = False

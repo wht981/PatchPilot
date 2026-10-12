@@ -1,4 +1,7 @@
-# Showcase: a complete PatchPilot run
+# Showcase: a complete offline heuristic run
+
+These historical outputs predate the default LLM engine. Select
+`--engine heuristic` to reproduce them without model credentials.
 
 The files here are the **unedited output of a real PatchPilot run**
 against a fresh git clone of the sample calculator repo:
@@ -13,6 +16,7 @@ The command that produced them:
 
 ```bash
 python -m patchpilot run \
+  --engine heuristic \
   --repo /path/to/calculator-demo \
   --issue examples/sample_issue.md \
   --output docs/showcase/demo-report.md \
@@ -32,6 +36,7 @@ The same run works with a GitHub issue URL instead of a local file:
 
 ```bash
 python -m patchpilot run \
+  --engine heuristic \
   --repo /path/to/calculator-demo \
   --issue https://github.com/<owner>/<repo>/issues/<n>
 ```

@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -55,13 +56,13 @@ def detect_test_commands(repo_path: str) -> List[str]:
     repo = Path(repo_path)
     if _has_python_test_files(repo):
         if importlib.util.find_spec("pytest") is not None:
-            return [f"{PYTHON} -m pytest -q"]
-        return [f"{PYTHON} -m unittest discover -v"]
+            return [f"{shlex.quote(PYTHON)} -m pytest -v"]
+        return [f"{shlex.quote(PYTHON)} -m unittest discover -v"]
     npm = _npm_test_script(repo)
     if npm:
         return [npm]
     if _has_python_files(repo):
-        return [f"{PYTHON} -m compileall -q ."]
+        return [f"{shlex.quote(PYTHON)} -m compileall -q ."]
     return []
 
 

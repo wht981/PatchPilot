@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from patchpilot.git_workflow import detect_git_state, slugify
+from patchpilot.git_workflow import commit_fix_on_branch, detect_git_state, slugify
+from patchpilot.models import FileChange
 from patchpilot.pipeline import run_pipeline
 
 
@@ -36,6 +37,7 @@ class GitRepoFixture(unittest.TestCase):
 
     def _run(self, **kwargs):
         return run_pipeline(
+            engine="heuristic",
             repo_path=str(self.repo),
             issue_path=str(EXAMPLES / "sample_issue.md"),
             output_path=str(self.workdir / "report.md"),
@@ -65,6 +67,15 @@ class TestDetectGitState(GitRepoFixture):
 
 
 class TestAutoDelivery(GitRepoFixture):
+    def test_shell_metacharacters_in_changed_path_are_literal(self):
+        self._init_git()
+        name = "module $(touch escaped).py"
+        (self.repo / name).write_text("value = 1\n")
+        delivery = commit_fix_on_branch(str(self.repo), [FileChange(name, "new module", "")], "issue")
+        self.assertEqual(delivery.mode, "branch")
+        self.assertFalse((self.repo / "escaped").exists())
+        self.assertIn(name, _git(self.repo, "show", "--name-only", "HEAD"))
+
     def test_fix_lands_on_new_branch_and_main_stays_clean(self):
         self._init_git()
         result = self._run()

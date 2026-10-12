@@ -1,0 +1,5 @@
+test_normalize_case
+test_normalize_whitespace
+test_normalize_unicode
+test_greet
+test_empty_name

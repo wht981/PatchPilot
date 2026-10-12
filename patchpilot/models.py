@@ -108,6 +108,14 @@ class Delivery:
 
 
 @dataclass
+class ModelUsage:
+    model: str = ""
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
 class PatchPilotResult:
     """Full result of a PatchPilot run, consumed by the report writer."""
 
@@ -121,6 +129,9 @@ class PatchPilotResult:
     final_status: str = "unknown"
     dry_run: bool = False
     delivery: Optional[Delivery] = None
+    engine: str = "heuristic"
+    model_usage: Optional[ModelUsage] = None
+    error: str = ""
 
     @property
     def all_commands(self) -> List[CommandExecution]:
@@ -148,5 +159,11 @@ class PatchPilotResult:
         """The verified changes that made the suite pass (empty unless fixed)."""
         if self.final_status != "fixed":
             return []
-        kept = [c for c in self.all_changed_files if "reverted" not in c.reason]
-        return kept[-1:] if kept else []
+        # An attempt is a coherent transaction, potentially spanning several
+        # files. Return the complete winning attempt, never a suffix of history.
+        for round_ in reversed(self.debug_rounds):
+            if round_.test is not None and round_.test.passed and round_.patch is not None:
+                return list(round_.patch.changed_files)
+        if self.initial_test is not None and self.initial_test.passed and self.initial_patch is not None:
+            return list(self.initial_patch.changed_files)
+        return []

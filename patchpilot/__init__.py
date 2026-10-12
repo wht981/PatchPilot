@@ -1,7 +1,3 @@
-"""PatchPilot: a test-verified autonomous coding agent.
+"""PatchPilot: an LLM-driven, test-verified coding agent."""
 
-Pipeline: Issue Loader -> Repo Context Builder -> Planner -> Patch Runner
--> Test Runner -> Debug Loop -> Report Writer.
-"""
-
-__version__ = "0.3.0"
+__version__ = "0.4.0"

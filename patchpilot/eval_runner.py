@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from patchpilot.llm import LLMConfig
 from patchpilot.models import PatchPilotResult
 from patchpilot.pipeline import run_pipeline
 
@@ -36,6 +37,9 @@ class TaskResult:
     files_changed: int
     patch_size_lines: int
     failure_reason: str
+    model_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -49,6 +53,9 @@ def run_eval(
     tasks_dir: str,
     output_dir: str = "eval_results",
     max_debug_rounds: int = 1,
+    engine: str = "llm",
+    llm_config: Optional[LLMConfig] = None,
+    max_model_calls: int = 16,
 ) -> EvalSummary:
     tasks_root = Path(tasks_dir)
     if not tasks_root.is_dir():
@@ -60,7 +67,11 @@ def run_eval(
     for task_dir in sorted(p for p in tasks_root.iterdir() if p.is_dir()):
         if not (task_dir / "repo").is_dir() or not (task_dir / "issue.md").is_file():
             continue
-        results.append(_run_task(task_dir, output, max_debug_rounds))
+        results.append(_run_task(task_dir, output, max_debug_rounds,
+                                 engine, llm_config, max_model_calls))
+
+    if not results:
+        raise ValueError("No valid evaluation tasks found; each needs repo/ and issue.md.")
 
     summary = EvalSummary(
         total=len(results),
@@ -74,7 +85,8 @@ def run_eval(
     return summary
 
 
-def _run_task(task_dir: Path, output: Path, max_debug_rounds: int) -> TaskResult:
+def _run_task(task_dir: Path, output: Path, max_debug_rounds: int,
+              engine: str, llm_config: Optional[LLMConfig], max_model_calls: int) -> TaskResult:
     task_id = task_dir.name
     task_output = output / task_id
     task_output.mkdir(parents=True, exist_ok=True)
@@ -93,6 +105,7 @@ def _run_task(task_dir: Path, output: Path, max_debug_rounds: int) -> TaskResult
             output_path=str(task_output / "report.md"),
             trace_path=str(task_output / "trace.json"),
             max_debug_rounds=max_debug_rounds,
+            engine=engine, llm_config=llm_config, max_model_calls=max_model_calls,
         )
     except Exception as exc:  # a task crash must not abort the whole eval
         failure_reason = f"pipeline error: {exc}"
@@ -118,10 +131,12 @@ def _run_task(task_dir: Path, output: Path, max_debug_rounds: int) -> TaskResult
         failure_reason = _STATUS_FAILURE_REASONS.get(
             result.final_status, f"final status: {result.final_status}"
         )
+        if result.error:
+            failure_reason = result.error
         if expected_verified is False:
             failure_reason = "expected tests not found in passing output"
 
-    kept = [c for c in result.all_changed_files if "reverted" not in c.reason]
+    kept = result.kept_changes
     patch_size = sum(
         1
         for change in kept
@@ -140,6 +155,9 @@ def _run_task(task_dir: Path, output: Path, max_debug_rounds: int) -> TaskResult
         files_changed=len({c.path for c in kept}) if result.final_status == "fixed" else 0,
         patch_size_lines=patch_size if result.final_status == "fixed" else 0,
         failure_reason=failure_reason,
+        model_calls=result.model_usage.calls if result.model_usage else 0,
+        input_tokens=result.model_usage.input_tokens if result.model_usage else 0,
+        output_tokens=result.model_usage.output_tokens if result.model_usage else 0,
     )
 
 
@@ -148,6 +166,7 @@ _STATUS_FAILURE_REASONS = {
     "no_safe_repair": "no safe repair candidate was found",
     "no_tests": "no test command detected, repair unverifiable",
     "already_passing": "task repo was not actually failing",
+    "model_error": "model request failed or call budget exhausted",
 }
 
 
@@ -165,7 +184,11 @@ def _expected_tests_verified(task_dir: Path, result: PatchPilotResult) -> Option
     if not expected:
         return None
     output_chunks = []
-    for execution in result.all_commands:
+    final_tests = [result.initial_test] + [r.test for r in result.debug_rounds]
+    final_tests = [t for t in final_tests if t is not None]
+    if not final_tests or not final_tests[-1].passed:
+        return False
+    for execution in final_tests[-1].commands:
         output_chunks.append(execution.stdout)
         output_chunks.append(execution.stderr)
     combined = "\n".join(output_chunks)
@@ -182,14 +205,14 @@ def _render_summary(summary: EvalSummary) -> str:
         "",
         "## Task Results",
         "",
-        "| Task | Success | Status | Runtime (s) | Commands | Files changed | Patch size | Failure reason |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Task | Success | Status | Runtime (s) | Commands | Files changed | Patch size | Model calls | Tokens (in/out) | Failure reason |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in summary.results:
         lines.append(
             f"| {r.task_id} | {'✅' if r.success else '❌'} | {r.final_status} | "
             f"{r.runtime_seconds} | {r.commands_executed} | {r.files_changed} | "
-            f"{r.patch_size_lines} | {r.failure_reason or '-'} |"
+            f"{r.patch_size_lines} | {r.model_calls} | {r.input_tokens}/{r.output_tokens} | {r.failure_reason or '-'} |"
         )
 
     lines += ["", "## Failure Taxonomy", ""]
@@ -210,8 +233,7 @@ def _render_summary(summary: EvalSummary) -> str:
         "",
         "## Next Improvements",
         "",
-        "- Broader repair strategies beyond single-token mutations",
-        "  (e.g. an optional LLM-backed repair engine).",
+        "- Compare LLM repairs against the explicit offline heuristic baseline.",
         "- Richer failure taxonomy (localization miss vs. repair miss).",
         "- Larger, more diverse task set with multi-file bugs.",
         "",

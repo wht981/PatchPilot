@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from patchpilot.models import Issue, RepoContext
+from patchpilot.security import is_sensitive_path
 
 
 SKIP_DIRS = {
@@ -69,6 +70,8 @@ def _iter_repo_files(repo: Path) -> List[Path]:
         except OSError:
             continue
         for entry in entries:
+            if entry.is_symlink() or is_sensitive_path(str(entry.relative_to(repo))):
+                continue
             if entry.is_dir():
                 if entry.name not in SKIP_DIRS:
                     stack.append(entry)
@@ -123,7 +126,12 @@ def _is_test_file(relative: str) -> bool:
     return (
         name.startswith("test_")
         or name.endswith("_test.py")
+        or "_test." in name
         or name.endswith(".test.js")
+        or ".test." in name or ".spec." in name
+        or "__tests__" in Path(relative).parts
+        or "test" in Path(relative).parts
+        or name == "conftest.py"
         or "tests/" in relative.replace("\\", "/")
     )
 
@@ -150,7 +158,7 @@ def build_repo_context(repo_path: str, issue: Issue) -> RepoContext:
     source_files = [
         r
         for r in relative_paths
-        if Path(r).suffix in (".py", ".js", ".ts", ".go", ".rs", ".java")
+        if Path(r).suffix in (".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".rb", ".php", ".cs", ".kt", ".swift")
         and r not in test_files
     ]
 

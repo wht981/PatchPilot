@@ -15,6 +15,7 @@ All git commands run through the security-validated ``run_command``.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -101,11 +102,14 @@ def commit_fix_on_branch(
             note=f"could not create branch {branch}: {checkout.stderr.strip()}",
         )
 
-    paths = " ".join(f'"{c.path}"' for c in changes)
-    run_command(f"git add -- {paths}", repo_path, timeout=15, policy=policy)
-    message = f"PatchPilot: fix {issue_title}".replace('"', "'")
+    paths = " ".join(shlex.quote(c.path) for c in changes)
+    staged = run_command(f"git add -- {paths}", repo_path, timeout=15, policy=policy)
+    if staged.exit_code != 0:
+        return Delivery(mode=IN_PLACE, branch=branch,
+                        note=f"could not stage fix on {branch}: {staged.stderr.strip()}")
+    message = shlex.quote(f"PatchPilot: fix {issue_title}")
     committed = run_command(
-        f'git commit -m "{message}"', repo_path, timeout=15, policy=policy
+        f"git commit -m {message}", repo_path, timeout=15, policy=policy
     )
     if committed.exit_code != 0:
         return Delivery(

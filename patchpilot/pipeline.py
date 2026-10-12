@@ -1,7 +1,4 @@
-"""PatchPilot pipeline: the bounded autonomous repair loop.
-
-Issue Loader -> Repo Context Builder -> Planner -> Patch Runner
--> Test Runner -> Debug Loop (bounded) -> Report Writer.
+"""PatchPilot pipeline: the bounded LLM-driven repair loop.
 
 Every step is traced; every repair attempt is verified by tests and
 reverted if the suite does not pass.
@@ -12,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
+from patchpilot.agent import LLMAgent
+from patchpilot.llm import LLMConfig, LLMError, ModelClient, OpenAICompatibleClient
 from patchpilot.git_workflow import (
     AUTO,
     IN_PLACE,
@@ -27,6 +26,7 @@ from patchpilot.models import (
     Delivery,
     PatchPilotResult,
     PatchResult,
+    RepairPlan,
     TestResult,
 )
 from patchpilot.patch_runner import CandidatePatch, PatchRunner
@@ -46,6 +46,7 @@ NOT_FIXED = "not_fixed"
 NO_SAFE_REPAIR = "no_safe_repair"
 NO_TESTS = "no_tests"
 DRY_RUN = "dry_run"
+MODEL_ERROR = "model_error"
 
 SUCCESS_STATUSES = (FIXED, ALREADY_PASSING, DRY_RUN)
 
@@ -64,13 +65,30 @@ def run_pipeline(
     test_timeout: float = 120.0,
     apply_mode: str = AUTO,
     patch_file: str = "patchpilot_fix.patch",
+    engine: str = "llm",
+    llm_config: Optional[LLMConfig] = None,
+    model_client: Optional[ModelClient] = None,
+    max_model_calls: int = 16,
 ) -> PatchPilotResult:
-    policy = SecurityPolicy()
+    if engine not in ("llm", "heuristic"):
+        raise ValueError("engine must be llm or heuristic")
+    if not 0 <= max_debug_rounds <= 20:
+        raise ValueError("max debug rounds must be between 0 and 20")
+    if not 1 <= max_model_calls <= 100:
+        raise ValueError("max model calls must be between 1 and 100")
+    if apply_mode not in (AUTO, IN_PLACE, NO_APPLY):
+        raise ValueError("invalid apply mode")
+    if engine == "llm" and model_client is None:
+        llm_config = llm_config or LLMConfig.from_env()
+    policy = SecurityPolicy(
+        known_secrets=[llm_config.api_key] if llm_config else [],
+        secret_env_vars=[llm_config.api_key_env] if llm_config else [],
+    )
     tracer = Tracer(policy)
 
     issue = load_issue(issue_path)
     tracer.record("issue_loaded", path=issue.path, title=issue.title)
-    logger.info("Loaded issue: %s", issue.title)
+    logger.info("Loaded issue: %s", policy.mask_secrets(issue.title))
 
     context = build_repo_context(repo_path, issue)
     tracer.record(
@@ -80,17 +98,33 @@ def run_pipeline(
         candidate_files=context.candidate_files,
         keywords=context.keywords,
     )
-    logger.info("Candidate files: %s", context.candidate_files)
+    logger.info("Candidate files: %s", policy.sanitize(context.candidate_files))
 
-    planner = HeuristicPlanner()
-    plan = planner.create_repair_plan(issue, context)
-    tracer.record("plan_created", candidate_files=plan.candidate_files)
-
-    result = PatchPilotResult(
-        issue=issue, repo_context=context, plan=plan, dry_run=dry_run
+    agent = None
+    if engine == "llm":
+        client = model_client or OpenAICompatibleClient(llm_config, policy)
+        agent = LLMAgent(client, context, policy, tracer, max_model_calls)
+    plan = HeuristicPlanner().create_repair_plan(issue, context) if engine == "heuristic" else RepairPlan(
+        issue_summary=issue.title, suspected_root_cause="Awaiting model analysis.",
+        candidate_files=[], proposed_changes="No patch proposed.",
+        test_strategy="Run the original detected test commands.",
+        risk_notes="Model edits are validated, test-verified and reverted on failure.",
     )
+    result = PatchPilotResult(
+        issue=issue, repo_context=context, plan=plan, dry_run=dry_run, engine=engine,
+        model_usage=agent.usage if agent else None,
+    )
+    tracer.record("engine_selected", engine=engine, model=client.model if agent else "")
 
     if dry_run:
+        if agent:
+            try:
+                result.plan = agent.create_repair_plan(issue, context)
+            except LLMError as exc:
+                _model_error(result, tracer, exc, policy)
+                _finish(result, tracer, output_path, trace_path)
+                return result
+        tracer.record("plan_created", candidate_files=result.plan.candidate_files)
         result.final_status = DRY_RUN
         tracer.record("final_status", status=DRY_RUN, reason="dry run requested")
         _finish(result, tracer, output_path, trace_path)
@@ -105,6 +139,8 @@ def run_pipeline(
     )
 
     commands = detect_test_commands(context.repo_path)
+    if agent and commands and all(" -m compileall " in c for c in commands):
+        commands = []  # Compilation alone cannot verify a behavioral repair.
     tracer.record("tests_detected", commands=commands)
     if not commands:
         result.final_status = NO_TESTS
@@ -130,9 +166,19 @@ def run_pipeline(
         _finish(result, tracer, output_path, trace_path)
         return result
 
-    revert_fix = _run_heuristic_repair(
-        result, commands, policy, tracer, max_debug_rounds, test_timeout
-    )
+    if agent:
+        try:
+            result.plan = agent.create_repair_plan(issue, context, failure_output(baseline))
+            tracer.record("plan_created", candidate_files=result.plan.candidate_files)
+            revert_fix = _run_llm_repair(
+                agent, result, commands, policy, tracer, max_debug_rounds, test_timeout)
+        except LLMError as exc:
+            _model_error(result, tracer, exc, policy)
+            revert_fix = None
+    else:
+        tracer.record("plan_created", candidate_files=result.plan.candidate_files)
+        revert_fix = _run_heuristic_repair(
+            result, commands, policy, tracer, max_debug_rounds, test_timeout)
 
     if result.final_status == FIXED:
         result.delivery = _deliver_fix(
@@ -151,6 +197,50 @@ def run_pipeline(
     return result
 
 
+def _model_error(result, tracer, exc, policy) -> None:
+    result.final_status = MODEL_ERROR
+    result.error = policy.mask_secrets(str(exc))
+    tracer.record("final_status", status=MODEL_ERROR, reason=result.error)
+
+
+def _run_llm_repair(agent, result, commands, policy, tracer,
+                    max_debug_rounds, test_timeout):
+    feedback = failure_output(result.baseline_test)
+    attempted = False
+    for attempt in range(1, max_debug_rounds + 2):
+        transaction = agent.propose_patch(feedback)
+        if transaction is None:
+            result.final_status = NOT_FIXED if attempted else NO_SAFE_REPAIR
+            result.error = agent.last_analysis
+            return None
+        transaction.apply()
+        attempted = True
+        tracer.record("patch_applied", attempt=attempt, files=[c.path for c in transaction.changes])
+        try:
+            test = run_tests(result.repo_context.repo_path, commands, policy, timeout=test_timeout)
+        except BaseException:
+            transaction.revert()
+            tracer.record("patch_reverted", attempt=attempt, reason="verification interrupted")
+            raise
+        patch = PatchResult(transaction.changes, True, agent.last_analysis)
+        if attempt == 1:
+            result.initial_patch, result.initial_test = patch, test
+        else:
+            result.debug_rounds.append(DebugRound(attempt - 1, agent.last_analysis, patch, test))
+        tracer.record("tests_run", attempt=attempt, passed=test.passed, summary=test.summary)
+        if test.passed:
+            result.final_status = FIXED
+            return transaction.revert
+        transaction.revert()
+        tracer.record("patch_reverted", attempt=attempt)
+        feedback = (
+            "The previous patch failed and was reverted. Propose a revised patch against original source.\n"
+            + failure_output(test) + "\nPrevious patch:\n"
+            + "".join(c.diff for c in transaction.changes)[:12000])
+    result.final_status = NOT_FIXED
+    return None
+
+
 def _deliver_fix(
     result: PatchPilotResult,
     git_state: GitState,
@@ -164,19 +254,12 @@ def _deliver_fix(
     kept = result.kept_changes
 
     if apply_mode == NO_APPLY:
-        delivery = write_patch_file(kept, patch_file)
-        if revert_fix is not None:
-            revert_fix()
-        elif git_state.is_repo:
-            from patchpilot.execution import run_command
-
-            run_command("git checkout -- .", repo_path, timeout=15, policy=policy)
-        else:
-            delivery.note += (
-                " (warning: the fix could not be reverted automatically; "
-                "the working tree still contains it)"
-            )
-        return delivery
+        # --no-apply restores the workspace even when writing the artifact fails.
+        try:
+            return write_patch_file(kept, patch_file)
+        finally:
+            if revert_fix is not None:
+                revert_fix()
 
     if apply_mode == IN_PLACE:
         return Delivery(mode=IN_PLACE, note="fix applied to the working tree")
@@ -265,7 +348,11 @@ def _try_candidate(
         candidate, reason=f"attempt {attempt}: {candidate.description}"
     )
     tracer.record("patch_applied", attempt=attempt, description=candidate.description)
-    test = run_tests(repo_path, commands, policy, timeout=test_timeout)
+    try:
+        test = run_tests(repo_path, commands, policy, timeout=test_timeout)
+    except BaseException:
+        runner.revert(candidate)
+        raise
     tracer.record(
         "tests_run", attempt=attempt, passed=test.passed, summary=test.summary
     )
@@ -305,7 +392,9 @@ def _finish(
     output_path: Optional[str],
     trace_path: Optional[str],
 ) -> None:
-    if output_path:
-        write_report(result, output_path)
-    if trace_path:
-        tracer.save(trace_path)
+    try:
+        if output_path:
+            write_report(result, output_path, policy=tracer.policy)
+    finally:
+        if trace_path:
+            tracer.save(trace_path)

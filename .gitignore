@@ -9,6 +9,8 @@ venv/
 dist/
 build/
 .env
+.env.*
+!.env.example
 
 # PatchPilot generated artifacts
 patchpilot_report.md

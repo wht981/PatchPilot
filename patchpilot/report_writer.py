@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from dataclasses import asdict
+from typing import List, Optional
 
 from patchpilot.models import PatchPilotResult
+from patchpilot.security import SecurityPolicy
 
 
 _STATUS_LINES = {
@@ -15,14 +17,17 @@ _STATUS_LINES = {
     "no_safe_repair": "⚠️ No safe repair — PatchPilot could not identify a safe repair candidate, so no files were modified.",
     "no_tests": "⚠️ No tests — no test command was detected, so a repair could not be verified and none was attempted.",
     "dry_run": "ℹ️ Dry run — analysis and planning only; no files were modified and no tests were run.",
+    "model_error": "❌ Model error — the model request or call budget failed; no unverified patch was kept.",
 }
 
 
-def write_report(result: PatchPilotResult, output_path: str) -> None:
-    Path(output_path).write_text(render_report(result), encoding="utf-8")
+def write_report(result: PatchPilotResult, output_path: str,
+                 policy: Optional[SecurityPolicy] = None) -> None:
+    Path(output_path).write_text((policy or SecurityPolicy()).mask_secrets(render_report(result)), encoding="utf-8")
 
 
-def result_summary_dict(result: PatchPilotResult) -> dict:
+def result_summary_dict(result: PatchPilotResult,
+                        policy: Optional[SecurityPolicy] = None) -> dict:
     """Machine-readable run summary for ``--json`` / CI consumers."""
     kept = result.kept_changes
     tests = {}
@@ -41,7 +46,7 @@ def result_summary_dict(result: PatchPilotResult) -> dict:
             "patch_path": result.delivery.patch_path,
             "note": result.delivery.note,
         }
-    return {
+    summary = {
         "final_status": result.final_status,
         "success": result.final_status in ("fixed", "already_passing", "dry_run"),
         "issue": {"title": result.issue.title, "source": result.issue.path},
@@ -52,7 +57,11 @@ def result_summary_dict(result: PatchPilotResult) -> dict:
         "debug_rounds": len(result.debug_rounds),
         "commands_executed": len(result.all_commands),
         "delivery": delivery,
+        "engine": result.engine,
+        "model_usage": asdict(result.model_usage) if result.model_usage else None,
+        "error": result.error,
     }
+    return (policy or SecurityPolicy()).sanitize(summary)
 
 
 def render_report(result: PatchPilotResult) -> str:
@@ -62,6 +71,7 @@ def render_report(result: PatchPilotResult) -> str:
     _add(sections, "Repository Summary", _repo_summary(result))
     _add(sections, "Files Inspected", _files_inspected(result))
     _add(sections, "Modification Plan", _plan(result))
+    _add(sections, "Agent Execution", _agent_execution(result))
     _add(sections, "Files Changed", _files_changed(result))
     _add(sections, "Patch Diff", _patch_diff(result))
     _add(sections, "Commands Executed", _commands(result))
@@ -130,6 +140,17 @@ def _plan(result: PatchPilotResult) -> str:
             f"- **Risk notes:** {plan.risk_notes}",
         ]
     )
+
+
+def _agent_execution(result: PatchPilotResult) -> str:
+    lines = [f"- Engine: `{result.engine}`"]
+    if result.model_usage:
+        usage = result.model_usage
+        lines.extend([f"- Model: `{usage.model}`", f"- Model calls: {usage.calls}",
+                      f"- Input tokens: {usage.input_tokens}", f"- Output tokens: {usage.output_tokens}"])
+    if result.error:
+        lines.append(f"- Detail: {result.error}")
+    return "\n".join(lines)
 
 
 def _kept_changes(result: PatchPilotResult) -> list:

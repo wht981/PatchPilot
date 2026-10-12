@@ -23,7 +23,7 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run eval regression gate (all tasks must pass)
-        run: python -m patchpilot eval --tasks ./examples/eval_tasks --output-dir /tmp/eval_results
+        run: python -m patchpilot eval --engine heuristic --tasks ./examples/eval_tasks --output-dir /tmp/eval_results
       - name: Upload eval summary
         if: always()
         uses: actions/upload-artifact@v4

@@ -18,7 +18,7 @@ from patchpilot.security import SecurityPolicy
 
 class Tracer:
     def __init__(self, policy: Optional[SecurityPolicy] = None) -> None:
-        self._policy = policy or SecurityPolicy()
+        self.policy = policy or SecurityPolicy()
         self.events: List[Dict[str, Any]] = []
 
     def record(self, event_type: str, **data: Any) -> None:
@@ -26,18 +26,9 @@ class Tracer:
             {
                 "time": datetime.now(timezone.utc).isoformat(),
                 "type": event_type,
-                "data": self._sanitize(data),
+                "data": self.policy.sanitize(data),
             }
         )
-
-    def _sanitize(self, value: Any) -> Any:
-        if isinstance(value, str):
-            return self._policy.mask_secrets(value)
-        if isinstance(value, dict):
-            return {k: self._sanitize(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [self._sanitize(v) for v in value]
-        return value
 
     def save(self, path: str) -> None:
         Path(path).write_text(

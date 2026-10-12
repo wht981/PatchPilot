@@ -1,8 +1,7 @@
 """Repair planning.
 
-The Planner is a pluggable interface; HeuristicPlanner is the default,
-deterministic, dependency-free implementation. An alternative planner
-only needs to provide ``create_repair_plan(issue, context)``.
+The explicit offline engine uses HeuristicPlanner. The default LLM
+engine explores and plans through LLMAgent in agent.py.
 """
 
 from __future__ import annotations
@@ -64,5 +63,5 @@ class HeuristicPlanner:
 
 
 def create_repair_plan(issue: Issue, context: RepoContext) -> RepairPlan:
-    """Module-level convenience using the default heuristic planner."""
+    """Module-level convenience for the offline heuristic planner."""
     return HeuristicPlanner().create_repair_plan(issue, context)

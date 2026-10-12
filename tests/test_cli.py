@@ -22,6 +22,7 @@ class CliFixture(unittest.TestCase):
     def _run_cli(self, *extra):
         argv = [
             "run",
+            "--engine", "heuristic",
             "--repo", str(self.repo),
             "--issue", str(EXAMPLES / "sample_issue.md"),
             "--output", str(self.workdir / "report.md"),
@@ -74,7 +75,7 @@ class TestExitCodes(CliFixture):
     def test_exit_two_on_missing_issue(self):
         code, _, stderr = self._run_cli()
         self.assertEqual(code, 0)  # sanity: fixture works
-        argv = ["run", "--repo", str(self.repo), "--issue", "/missing.md"]
+        argv = ["run", "--engine", "heuristic", "--repo", str(self.repo), "--issue", "/missing.md"]
         stdout, stderr_io = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr_io):
             code = main(argv)
@@ -88,6 +89,7 @@ class TestEvalJson(unittest.TestCase):
         self.addCleanup(shutil.rmtree, outdir, True)
         argv = [
             "eval",
+            "--engine", "heuristic",
             "--tasks", str(EXAMPLES / "eval_tasks"),
             "--output-dir", str(outdir),
             "--json",

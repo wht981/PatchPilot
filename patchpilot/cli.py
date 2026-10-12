@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="patchpilot",
         description=(
-            "PatchPilot: a test-verified autonomous coding agent. "
+            "PatchPilot: an LLM-driven, test-verified coding agent. "
             "Reads an issue, navigates the repository, plans a repair, "
             "edits code, verifies with tests, and writes a patch report."
         ),
@@ -50,8 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help=(
-            "max debug rounds after the initial round; each round tries up "
-            "to 6 test-verified candidate patches (default: 1)"
+            "max repair retries after the initial patch (default: 1; "
+            "heuristic mode tries up to 6 mutations per round)"
         ),
     )
     run.add_argument(
@@ -101,6 +101,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="print machine-readable JSON results to stdout (for CI)",
     )
     ev.add_argument("--verbose", action="store_true", help="verbose logging")
+    for command in (run, ev):
+        command.add_argument("--engine", choices=("llm", "heuristic"), default="llm",
+                             help="repair engine (default: llm; heuristic is offline)")
+        command.add_argument("--model", help="model ID (or PATCHPILOT_MODEL)")
+        command.add_argument("--base-url", help="OpenAI-compatible API base URL (or PATCHPILOT_BASE_URL)")
+        command.add_argument("--api-key-env", help="name of the API key environment variable (default: OPENAI_API_KEY)")
+        command.add_argument("--llm-timeout", type=float, help="timeout per model request in seconds (default: 60)")
+        command.add_argument("--max-tokens", type=int, help="output token limit per model request (default: 8192)")
+        command.add_argument("--token-parameter", choices=("max_completion_tokens", "max_tokens"),
+                             help="token limit field expected by the provider")
+        command.add_argument("--plain-json", action="store_true",
+                             help="omit response_format for endpoints without JSON mode; validation still applies")
+        command.add_argument("--max-model-calls", type=int, default=16,
+                             help="total model call budget per task, including invalid actions (default: 16)")
     return parser
 
 
@@ -136,6 +150,7 @@ def _run_command(args: argparse.Namespace) -> int:
         apply_mode = "no_apply"
     elif args.in_place:
         apply_mode = "in_place"
+    config = _llm_config(args)
     result = run_pipeline(
         repo_path=args.repo,
         issue_path=args.issue,
@@ -145,9 +160,12 @@ def _run_command(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         apply_mode=apply_mode,
         patch_file=args.patch_file,
+        engine=args.engine, llm_config=config, max_model_calls=args.max_model_calls,
     )
     if args.json:
-        summary = result_summary_dict(result)
+        from patchpilot.security import SecurityPolicy
+
+        summary = result_summary_dict(result, policy=SecurityPolicy(known_secrets=[config.api_key] if config else []))
         summary["report_path"] = args.output
         summary["trace_path"] = args.trace
         print(json.dumps(summary, indent=2))
@@ -166,6 +184,7 @@ def _eval_command(args: argparse.Namespace) -> int:
         tasks_dir=args.tasks,
         output_dir=args.output_dir,
         max_debug_rounds=args.max_debug_rounds,
+        engine=args.engine, llm_config=_llm_config(args), max_model_calls=args.max_model_calls,
     )
     if args.json:
         from dataclasses import asdict
@@ -175,6 +194,18 @@ def _eval_command(args: argparse.Namespace) -> int:
         print(f"Eval finished: {summary.passed}/{summary.total} tasks passed")
         print(f"Results written to: {args.output_dir}")
     return 0 if summary.passed == summary.total else 1
+
+
+def _llm_config(args: argparse.Namespace):
+    if args.engine == "heuristic":
+        return None
+    from patchpilot.llm import LLMConfig
+
+    return LLMConfig.from_env(
+        model=args.model, base_url=args.base_url, api_key_env=args.api_key_env,
+        timeout=args.llm_timeout, max_tokens=args.max_tokens,
+        token_parameter=args.token_parameter, json_mode=False if args.plain_json else None,
+    )
 
 
 if __name__ == "__main__":
